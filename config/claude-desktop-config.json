@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "docs-rag": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "/path/to/mcp-docs-rag/server.py"
+      ],
+      "env": {
+        "DOCS_FOLDER": "/path/to/your/team/docs",
+        "OPENAI_API_KEY": "sk-your-key-here",
+        "ENABLE_SEMANTIC_SEARCH": "true",
+        "ENABLE_IMAGE_UNDERSTANDING": "false",
+        "MAX_RESULTS": "10",
+        "INDEX_PATH": ".index"
+      }
+    }
+  }
+}

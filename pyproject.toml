@@ -1,0 +1,37 @@
+[project]
+name = "mcp-docs-rag"
+version = "0.1.0"
+description = "MCP server for smart documentation search with Docling"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "docling>=2.55.0",
+    "numpy>=2.0.0",
+    "pydantic>=2.0.0",
+    "aiofiles>=23.0.0",
+    "rapidfuzz>=3.0.0",
+    "sentence-transformers>=2.0.0",  # Local HuggingFace embeddings (FREE!)
+    "aiohttp>=3.9.0",
+]
+
+[project.optional-dependencies]
+# Optional: Only if you want OpenAI support
+openai = [
+    "openai>=1.0.0",
+]
+# Optional: GPU support for faster embeddings
+gpu = [
+    "torch>=2.0.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://aka.ms/vscode-mcp/schema",
+  "mcp.servers": {
+    "docs-rag": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "C:/path/to/mcp-docs-rag/server.py"
+      ],
+      "env": {
+        "DOCS_FOLDER": "C:/path/to/your/team/docs",
+        "OPENAI_API_KEY": "${env:OPENAI_API_KEY}",
+        "ENABLE_SEMANTIC_SEARCH": "true",
+        "ENABLE_IMAGE_UNDERSTANDING": "false"
+      },
+      "description": "Smart documentation search with RAG"
+    }
+  }
+}
