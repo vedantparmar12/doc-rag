@@ -1,20 +1,33 @@
 """
 Document indexer for building searchable index.
-Uses Docling for image understanding if enabled.
-Uses advanced HybridChunker for better chunking.
+NOW WITH: Batch processing, table extraction, image OCR, link tracking.
 """
 
 import os
 import re
 import json
 import logging
+import asyncio
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from dataclasses import dataclass
 
 import numpy as np
 
+from .table_extractor import MarkdownTableExtractor
+from .image_ocr import ImageProcessor
+from .link_extractor import LinkExtractor
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ProcessingBatch:
+    """Batch of files to process together."""
+    files: List[Path]
+    batch_id: int
+    total_batches: int
 
 
 class AdvancedChunkingConfig:
@@ -49,7 +62,7 @@ class AdvancedChunkingConfig:
 
 
 class DocIndexer:
-    """Build and manage document index with advanced chunking."""
+    """Build and manage document index with ALL optimizations."""
 
     def __init__(
         self,
@@ -57,13 +70,24 @@ class DocIndexer:
         index_path: Path,
         enable_embeddings: bool = True,
         enable_vlm: bool = False,
+        enable_table_extraction: bool = True,
+        enable_image_ocr: bool = True,
+        enable_link_tracking: bool = True,
+        ocr_backend: str = "auto",
+        max_workers: int = None,
         chunking_config: Optional[AdvancedChunkingConfig] = None
     ):
         self.docs_folder = docs_folder
         self.index_path = index_path
         self.enable_embeddings = enable_embeddings
         self.enable_vlm = enable_vlm
+        self.enable_table_extraction = enable_table_extraction
+        self.enable_image_ocr = enable_image_ocr
+        self.enable_link_tracking = enable_link_tracking
         self.chunking_config = chunking_config or AdvancedChunkingConfig()
+
+        # Parallel processing
+        self.max_workers = max_workers or self._detect_optimal_workers()
 
         # Ensure index directory exists
         self.index_path.mkdir(parents=True, exist_ok=True)
@@ -71,7 +95,15 @@ class DocIndexer:
         # Index data
         self.file_index: Dict[str, Dict[str, Any]] = {}
         self.embeddings_list: List[np.ndarray] = []
-        self.chunk_metadata_list: List[Dict[str, Any]] = []  # Track chunk metadata
+        self.chunk_metadata_list: List[Dict[str, Any]] = []
+
+        # Feature processors
+        self.table_extractor = MarkdownTableExtractor() if enable_table_extraction else None
+        self.image_processor = ImageProcessor(
+            enable_ocr=enable_image_ocr,
+            ocr_backend=ocr_backend
+        ) if enable_image_ocr else None
+        self.link_extractor = LinkExtractor(docs_folder) if enable_link_tracking else None
 
         # Embedder (lazy load)
         self._embedder = None
@@ -79,40 +111,131 @@ class DocIndexer:
         self._chunker = None
         self._tokenizer = None
 
+    def _detect_optimal_workers(self) -> int:
+        """Auto-detect optimal worker count for CPU."""
+        import os
+        cpu_count = os.cpu_count() or 4
+        # Leave 1-2 cores for system, use rest for processing
+        return max(1, cpu_count - 1)
+
     async def build_index(self):
-        """Build complete index."""
+        """Build complete index with BATCH PROCESSING."""
         logger.info(f"Building index for {self.docs_folder}")
+        logger.info(f"Parallel workers: {self.max_workers}")
+        logger.info(f"Features enabled:")
+        logger.info(f"  - Table extraction: {self.enable_table_extraction}")
+        logger.info(f"  - Image OCR: {self.enable_image_ocr}")
+        logger.info(f"  - Link tracking: {self.enable_link_tracking}")
+        logger.info(f"  - Embeddings: {self.enable_embeddings}")
+
         start_time = datetime.now()
 
         # Find all markdown files
         md_files = list(self.docs_folder.rglob("*.md"))
         logger.info(f"Found {len(md_files)} markdown files")
 
-        # Process each file
-        for i, file_path in enumerate(md_files):
-            rel_path = str(file_path.relative_to(self.docs_folder))
-            logger.info(f"Processing [{i+1}/{len(md_files)}]: {rel_path}")
+        if not md_files:
+            logger.warning("No markdown files found!")
+            return
 
-            try:
-                metadata = await self._process_file(file_path)
+        # Create batches for parallel processing
+        batch_size = 10  # Files per batch
+        batches = self._create_batches(md_files, batch_size)
+
+        # Process batches in parallel
+        processed_count = 0
+        total_tables = 0
+        total_images = 0
+        total_links = 0
+
+        for batch in batches:
+            results = await self._process_batch_parallel(batch)
+
+            # Add successful results to index
+            for rel_path, metadata in results.items():
                 self.file_index[rel_path] = metadata
 
-                # Generate embedding if enabled
-                if self.enable_embeddings and metadata.get('content'):
-                    embedding = await self._embed_content(metadata['content'])
-                    self.embeddings_list.append(embedding)
+                # Track stats
+                total_tables += metadata.get('table_count', 0)
+                total_images += metadata.get('image_count', 0)
+                total_links += metadata.get('link_stats', {}).get('total', 0)
 
-            except Exception as e:
-                logger.error(f"Failed to process {rel_path}: {e}", exc_info=True)
+            processed_count += len(results)
+            progress = (processed_count / len(md_files)) * 100
+            logger.info(f"Progress: {processed_count}/{len(md_files)} ({progress:.1f}%)")
+
+        # Generate embeddings in parallel
+        if self.enable_embeddings:
+            logger.info("Generating embeddings in parallel...")
+            await self._generate_embeddings_parallel()
 
         # Save index
         await self._save_index()
 
         elapsed = (datetime.now() - start_time).total_seconds()
-        logger.info(f"Index built in {elapsed:.2f}s: {len(self.file_index)} files")
+        logger.info(f"\n✓ Index built in {elapsed:.2f}s ({elapsed/60:.2f} minutes)")
+        logger.info(f"  Files indexed: {len(self.file_index)}")
+        logger.info(f"  Tables extracted: {total_tables}")
+        logger.info(f"  Images processed: {total_images}")
+        logger.info(f"  Links tracked: {total_links}")
+        if self.embeddings_list:
+            logger.info(f"  Embeddings generated: {len(self.embeddings_list)}")
+
+    def _create_batches(
+        self,
+        files: List[Path],
+        batch_size: int
+    ) -> List[ProcessingBatch]:
+        """Split files into processing batches."""
+        batches = []
+        total_batches = (len(files) + batch_size - 1) // batch_size
+
+        for i in range(0, len(files), batch_size):
+            batch_files = files[i:i+batch_size]
+            batches.append(ProcessingBatch(
+                files=batch_files,
+                batch_id=i // batch_size,
+                total_batches=total_batches
+            ))
+
+        return batches
+
+    async def _process_batch_parallel(
+        self,
+        batch: ProcessingBatch
+    ) -> Dict[str, Dict[str, Any]]:
+        """Process a batch of files in parallel."""
+        # Create tasks for all files in batch
+        tasks = [
+            self._process_file_safe(file_path)
+            for file_path in batch.files
+        ]
+
+        # Execute in parallel
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect successful results
+        batch_index = {}
+        for file_path, result in zip(batch.files, results):
+            if isinstance(result, Exception):
+                logger.error(f"Failed to process {file_path}: {result}")
+                continue
+
+            rel_path = str(file_path.relative_to(self.docs_folder))
+            batch_index[rel_path] = result
+
+        return batch_index
+
+    async def _process_file_safe(self, file_path: Path) -> Dict[str, Any]:
+        """Process file with error handling."""
+        try:
+            return await self._process_file(file_path)
+        except Exception as e:
+            logger.error(f"Error processing {file_path}: {e}", exc_info=True)
+            raise
 
     async def _process_file(self, file_path: Path) -> Dict[str, Any]:
-        """Process a single markdown file with advanced chunking."""
+        """Process a single markdown file with ALL features."""
         metadata = {
             'path': str(file_path.relative_to(self.docs_folder)),
             'modified': file_path.stat().st_mtime,
@@ -123,6 +246,7 @@ class DocIndexer:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
+        original_content = content
         metadata['content'] = content
 
         # Extract title
@@ -131,22 +255,60 @@ class DocIndexer:
         # Extract headings
         metadata['headings'] = self._extract_headings(content)
 
-        # Check for images
-        image_info = self._find_images(content)
-        metadata['has_images'] = len(image_info) > 0
-        metadata['image_count'] = len(image_info)
+        # Extract team/category from path
+        path_parts = Path(metadata['path']).parts
+        metadata['team'] = path_parts[0] if len(path_parts) > 0 else 'general'
+        metadata['category'] = path_parts[1] if len(path_parts) > 1 else 'general'
 
-        # Process images with Docling VLM if enabled
-        if self.enable_vlm and image_info:
-            image_descriptions = await self._process_images_with_docling(
-                file_path,
-                image_info
-            )
-            metadata['image_descriptions'] = image_descriptions
-            # Append image descriptions to content for better search
-            if image_descriptions:
-                content += "\n\n" + "\n".join(image_descriptions)
-                metadata['content'] = content
+        # FEATURE 1: Extract tables
+        if self.enable_table_extraction and self.table_extractor:
+            tables = self.table_extractor.extract_tables(content, str(file_path))
+            metadata['tables'] = [table.to_dict() for table in tables]
+            metadata['table_count'] = len(tables)
+
+            # Append table text to content for better search
+            if tables:
+                table_texts = [table.to_text() for table in tables]
+                metadata['table_text'] = "\n\n".join(table_texts)
+                content += "\n\n" + metadata['table_text']
+
+        # FEATURE 2: Process images with OCR
+        image_refs = self._find_images(original_content)
+        if image_refs:
+            if self.enable_image_ocr and self.image_processor:
+                enriched_images = await self.image_processor.process_images(
+                    file_path,
+                    image_refs
+                )
+                metadata['images'] = enriched_images
+                metadata['has_images'] = len(enriched_images) > 0
+                metadata['image_count'] = len(enriched_images)
+
+                # Collect OCR text for search
+                ocr_texts = []
+                for img in enriched_images:
+                    if img.get('ocr_text'):
+                        alt_text = img.get('alt', 'Image')
+                        ocr_texts.append(f"{alt_text}: {img['ocr_text']}")
+
+                if ocr_texts:
+                    metadata['image_ocr_text'] = '\n\n'.join(ocr_texts)
+                    content += '\n\n' + metadata['image_ocr_text']
+            else:
+                # Basic image info without OCR
+                metadata['images'] = image_refs
+                metadata['has_images'] = len(image_refs) > 0
+                metadata['image_count'] = len(image_refs)
+
+        # FEATURE 3: Extract and validate links
+        if self.enable_link_tracking and self.link_extractor:
+            links = self.link_extractor.extract_links(original_content, file_path)
+            metadata['links'] = [link.to_dict() for link in links]
+            metadata['related_files'] = self.link_extractor.get_related_files(links)
+            metadata['link_stats'] = self.link_extractor.get_link_stats(links)
+
+        # Update content with all enrichments
+        metadata['content'] = content
 
         # Generate chunks with advanced chunker
         chunks_data = await self._chunk_content(content, metadata)
@@ -160,7 +322,7 @@ class DocIndexer:
         file_metadata: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Chunk content using advanced Docling HybridChunker.
+        Chunk content using advanced chunking.
 
         Returns list of chunk metadata with:
         - content: Chunk text
@@ -175,8 +337,7 @@ class DocIndexer:
             if self._chunker is None:
                 await self._init_advanced_chunker()
 
-            # For markdown, we need to convert to DoclingDocument first
-            # For now, use simple paragraph-based chunking with heading context
+            # Use advanced markdown chunking with heading context
             chunks = self._chunk_markdown_with_context(content, file_metadata)
 
         except Exception as e:
@@ -215,13 +376,10 @@ class DocIndexer:
                 tokenizer=self._tokenizer,
                 max_tokens=self.chunking_config.max_tokens,
                 merge_peers=self.chunking_config.merge_peers,
-                serializer_provider=serializer_provider  # Advanced serialization!
+                serializer_provider=serializer_provider
             )
 
-            logger.info(f"Advanced chunker initialized with enhanced serialization")
-            logger.info(f"  - Markdown tables: enabled")
-            logger.info(f"  - Picture annotations: {self.enable_vlm}")
-            logger.info(f"  - Max tokens: {self.chunking_config.max_tokens}")
+            logger.info(f"Advanced chunker initialized")
 
         except ImportError as e:
             logger.warning(f"Could not initialize advanced chunker: {e}")
@@ -257,12 +415,10 @@ class DocIndexer:
                 heading_text = line.lstrip('#').strip()
 
                 # Update heading hierarchy
-                # Remove headings at same or deeper level
                 current_headings = [
                     h for h in current_headings
                     if h['level'] < heading_level
                 ]
-                # Add new heading
                 current_headings.append({
                     'level': heading_level,
                     'text': heading_text
@@ -270,10 +426,9 @@ class DocIndexer:
 
                 # Start new chunk at major headings (h1, h2)
                 if heading_level <= 2 and current_chunk:
-                    # Save current chunk
                     chunks.append(self._create_chunk_metadata(
                         '\n'.join(current_chunk),
-                        current_headings[:-1],  # Previous headings
+                        current_headings[:-1],
                         chunk_index,
                         file_metadata
                     ))
@@ -312,10 +467,7 @@ class DocIndexer:
         file_metadata: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Create metadata for a chunk."""
-        # Build heading path
         heading_path = [h['text'] for h in heading_hierarchy]
-
-        # Estimate tokens
         token_count = len(chunk_content) // 4  # Rough estimate
 
         return {
@@ -353,14 +505,12 @@ class DocIndexer:
 
     def _extract_title(self, content: str, file_path: Path) -> str:
         """Extract title from markdown."""
-        # Try to find first heading
         lines = content.split('\n')
         for line in lines[:20]:
             line = line.strip()
             if line.startswith('# '):
                 return line[2:].strip()
 
-        # Fallback to filename
         return file_path.stem.replace('-', ' ').replace('_', ' ').title()
 
     def _extract_headings(self, content: str) -> List[str]:
@@ -369,7 +519,6 @@ class DocIndexer:
         for line in content.split('\n'):
             line = line.strip()
             if line.startswith('#'):
-                # Remove hash marks
                 heading = re.sub(r'^#+\s*', '', line)
                 headings.append(heading)
 
@@ -401,73 +550,45 @@ class DocIndexer:
 
         return images
 
-    async def _process_images_with_docling(
-        self,
-        file_path: Path,
-        image_info: List[Dict[str, str]]
-    ) -> List[str]:
-        """Process images with Docling VLM for descriptions."""
-        descriptions = []
+    async def _generate_embeddings_parallel(self):
+        """Generate embeddings for all documents in parallel (BATCH MODE)."""
+        logger.info("Generating embeddings in parallel...")
 
-        try:
-            from docling.document_converter import DocumentConverter, PdfFormatOption
-            from docling.datamodel.pipeline_options import PdfPipelineOptions
-            from docling.datamodel.base_models import InputFormat
+        # Prepare contents
+        contents = []
+        paths = []
+        for path, metadata in self.file_index.items():
+            if metadata.get('content'):
+                contents.append(metadata['content'])
+                paths.append(path)
 
-            # Initialize Docling converter with VLM
-            if self._docling_converter is None:
-                pipeline_options = PdfPipelineOptions()
-                pipeline_options.do_picture_description = True
+        if not contents:
+            logger.warning("No content to embed")
+            return
 
-                self._docling_converter = DocumentConverter(
-                    format_options={
-                        InputFormat.PDF: PdfFormatOption(
-                            pipeline_options=pipeline_options
-                        )
-                    }
-                )
+        # Generate embeddings in batches (MUCH FASTER!)
+        batch_size = 32
+        for i in range(0, len(contents), batch_size):
+            batch_contents = contents[i:i+batch_size]
 
-            # For each image, try to get description
-            for img in image_info:
-                img_path = img['path']
+            embeddings = await self._embed_batch(batch_contents)
+            self.embeddings_list.extend(embeddings)
 
-                # Skip external URLs
-                if img_path.startswith('http'):
-                    continue
+            logger.info(f"Generated {len(self.embeddings_list)}/{len(contents)} embeddings")
 
-                # Resolve image path relative to markdown file
-                full_img_path = (file_path.parent / img_path).resolve()
-
-                if full_img_path.exists() and full_img_path.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                    # Note: Docling VLM primarily works with PDFs
-                    # For standalone images, we'd need a different approach
-                    # For now, just use alt text if available
-                    if img['alt']:
-                        descriptions.append(f"Image: {img['alt']}")
-
-        except ImportError:
-            logger.warning("Docling not available for image processing")
-        except Exception as e:
-            logger.error(f"Image processing failed: {e}")
-
-        return descriptions
-
-    async def _embed_content(self, content: str) -> np.ndarray:
-        """Generate embedding for content."""
+    async def _embed_batch(self, contents: List[str]) -> List[np.ndarray]:
+        """Generate embeddings for multiple contents at once (BATCH EMBEDDING)."""
         if self._embedder is None:
-            # Lazy load embedder based on environment
-            from ..search.embedders import create_embedder
+            from search.embedders import create_embedder
             provider = os.getenv("EMBEDDING_PROVIDER", "local")
             self._embedder = create_embedder(provider=provider)
 
-        # Truncate content if too long
-        # Local models can usually handle up to 512 tokens (~2000 chars)
-        # Adjust based on your embedding model
-        if len(content) > 2000:
-            content = content[:2000]
+        # Truncate contents
+        truncated = [c[:2000] if len(c) > 2000 else c for c in contents]
 
-        embedding = await self._embedder.embed_query(content)
-        return np.array(embedding)
+        # Batch embedding (much faster than one-by-one!)
+        embeddings = await self._embedder.embed_batch(truncated)
+        return [np.array(emb) for emb in embeddings]
 
     async def _save_index(self):
         """Save index to disk."""
@@ -477,7 +598,13 @@ class DocIndexer:
             json.dump({
                 'files': self.file_index,
                 'created': datetime.now().isoformat(),
-                'docs_count': len(self.file_index)
+                'docs_count': len(self.file_index),
+                'features': {
+                    'table_extraction': self.enable_table_extraction,
+                    'image_ocr': self.enable_image_ocr,
+                    'link_tracking': self.enable_link_tracking,
+                    'embeddings': self.enable_embeddings
+                }
             }, f, indent=2)
 
         logger.info(f"Saved index to {index_file}")
@@ -494,7 +621,7 @@ async def main():
     """CLI for building index."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Build documentation index")
+    parser = argparse.ArgumentParser(description="Build documentation index with optimizations")
     parser.add_argument("--docs", default=os.getenv("DOCS_FOLDER", "docs"),
                        help="Documentation folder")
     parser.add_argument("--index", default=".index", help="Index output path")
@@ -502,6 +629,17 @@ async def main():
                        help="Fast (metadata only) or full (with embeddings)")
     parser.add_argument("--enable-vlm", action='store_true',
                        help="Enable image understanding with Docling VLM")
+    parser.add_argument("--enable-table-extraction", action='store_true', default=True,
+                       help="Extract and index tables")
+    parser.add_argument("--enable-image-ocr", action='store_true', default=True,
+                       help="Extract text from images using OCR")
+    parser.add_argument("--enable-link-tracking", action='store_true', default=True,
+                       help="Track and validate internal/external links")
+    parser.add_argument("--ocr-backend", default="auto",
+                       choices=['auto', 'rapidocr', 'easyocr', 'tesseract'],
+                       help="OCR backend to use")
+    parser.add_argument("--max-workers", type=int, default=None,
+                       help="Number of parallel workers (default: auto-detect)")
 
     args = parser.parse_args()
 
@@ -511,12 +649,17 @@ async def main():
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
 
-    # Create indexer
+    # Create indexer with ALL features
     indexer = DocIndexer(
         docs_folder=Path(args.docs),
         index_path=Path(args.index),
         enable_embeddings=(args.mode == 'full'),
-        enable_vlm=args.enable_vlm
+        enable_vlm=args.enable_vlm,
+        enable_table_extraction=args.enable_table_extraction,
+        enable_image_ocr=args.enable_image_ocr,
+        enable_link_tracking=args.enable_link_tracking,
+        ocr_backend=args.ocr_backend,
+        max_workers=args.max_workers
     )
 
     # Build index

@@ -1,0 +1,50 @@
+{
+  "name": "quick-answer",
+  "description": "Get a fast, concise answer to a specific question. Uses semantic search to find the most relevant information and provides a direct answer with sources.",
+  "version": "1.0.0",
+  "author": "MCP Docs RAG",
+  "usage": "/quick-answer <question>",
+  "examples": [
+    "/quick-answer how to deploy to production",
+    "/quick-answer what is the default timeout",
+    "/quick-answer how to configure SSL",
+    "/quick-answer where are logs stored"
+  ],
+  "parameters": {
+    "question": {
+      "type": "string",
+      "required": true,
+      "description": "Question to answer (natural language)"
+    }
+  },
+  "workflow": [
+    {
+      "step": 1,
+      "action": "semantic_search",
+      "description": "Find most relevant sections",
+      "params": {
+        "query": "${question}",
+        "limit": 3
+      }
+    },
+    {
+      "step": 2,
+      "action": "extract_answer",
+      "description": "Extract the specific information that answers the question",
+      "logic": "Focus on the most relevant paragraph or section"
+    },
+    {
+      "step": 3,
+      "action": "verify_with_tables",
+      "description": "Check if answer is in a table",
+      "params": {
+        "query": "${question}",
+        "limit": 1
+      }
+    }
+  ],
+  "output_format": {
+    "type": "markdown",
+    "template": "## Answer\n\n{concise_answer}\n\n## Details\n\n{detailed_explanation}\n\n## Source\n\n📁 {file_path}\n🔗 Section: {section_heading}\n\n{relevant_excerpt}"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(test:*)",
+      "Bash(chmod:*)",
+      "Bash(python create_zip.py:*)"
+    ]
+  }
+}
