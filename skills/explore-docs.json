@@ -1,0 +1,60 @@
+{
+  "name": "explore-docs",
+  "description": "Browse and explore documentation structure. Lists teams, categories, and documents with summaries. Perfect for discovering what documentation is available.",
+  "version": "1.0.0",
+  "author": "MCP Docs RAG",
+  "usage": "/explore-docs [folder-path]",
+  "examples": [
+    "/explore-docs",
+    "/explore-docs platform-team",
+    "/explore-docs backend-team/api",
+    "/explore-docs infrastructure"
+  ],
+  "parameters": {
+    "folder_path": {
+      "type": "string",
+      "required": false,
+      "description": "Folder to explore (default: root, shows all teams)"
+    }
+  },
+  "workflow": [
+    {
+      "step": 1,
+      "action": "list_structure",
+      "description": "List folder structure",
+      "params": {
+        "path": "${folder_path}",
+        "depth": 3
+      }
+    },
+    {
+      "step": 2,
+      "action": "get_summaries",
+      "description": "Get brief summaries of each document",
+      "logic": "For each file in the structure, extract title and first paragraph"
+    },
+    {
+      "step": 3,
+      "action": "count_features",
+      "description": "Count tables, images, and links in each document",
+      "output": "Statistics about document contents"
+    }
+  ],
+  "output_format": {
+    "type": "markdown",
+    "structure": [
+      "# Documentation Structure: {folder_path}",
+      "## Overview",
+      "Total documents, teams, categories",
+      "## Folders",
+      "├── team-name/",
+      "│   ├── category/",
+      "│   │   ├── document.md (3 tables, 2 images)",
+      "│   │   └── Summary: Brief description",
+      "## Quick Stats",
+      "- Total files: X",
+      "- Total tables: Y",
+      "- Total images: Z"
+    ]
+  }
+}

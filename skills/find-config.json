@@ -1,0 +1,53 @@
+{
+  "name": "find-config",
+  "description": "Extract configuration examples and code snippets from documentation. Finds YAML, JSON, shell scripts, and other configuration files.",
+  "version": "1.0.0",
+  "author": "MCP Docs RAG",
+  "usage": "/find-config <config-type> [language]",
+  "examples": [
+    "/find-config kubernetes deployment yaml",
+    "/find-config terraform aws",
+    "/find-config docker compose",
+    "/find-config github actions workflow",
+    "/find-config nginx configuration"
+  ],
+  "parameters": {
+    "config_type": {
+      "type": "string",
+      "required": true,
+      "description": "Type of configuration to find (e.g., 'kubernetes deployment', 'terraform')"
+    },
+    "language": {
+      "type": "string",
+      "required": false,
+      "description": "Code language filter (yaml, json, bash, hcl, etc.)"
+    }
+  },
+  "workflow": [
+    {
+      "step": 1,
+      "action": "find_configs",
+      "description": "Search for configuration examples",
+      "params": {
+        "query": "${config_type}",
+        "language": "${language}"
+      }
+    },
+    {
+      "step": 2,
+      "action": "get_file_context",
+      "description": "Get surrounding documentation for each config",
+      "logic": "For each found config, retrieve the file and extract context"
+    },
+    {
+      "step": 3,
+      "action": "format_configs",
+      "description": "Format with syntax highlighting and explanations",
+      "output": "Code blocks with language tags and context"
+    }
+  ],
+  "output_format": {
+    "type": "markdown",
+    "template": "## {config_type} Configuration Examples\n\n### Example 1: {title}\n**Source:** {file_path}\n\n**Description:** {context}\n\n```{language}\n{code}\n```\n\n**Usage:** {usage_notes}"
+  }
+}

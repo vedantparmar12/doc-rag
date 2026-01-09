@@ -1,0 +1,58 @@
+{
+  "name": "find-table",
+  "description": "Search for specific tables in documentation and display them with full context. Perfect for finding pricing tables, comparison matrices, configuration options, etc.",
+  "version": "1.0.0",
+  "author": "MCP Docs RAG",
+  "usage": "/find-table <description>",
+  "examples": [
+    "/find-table pricing tiers",
+    "/find-table deployment options comparison",
+    "/find-table API endpoints",
+    "/find-table configuration settings"
+  ],
+  "parameters": {
+    "description": {
+      "type": "string",
+      "required": true,
+      "description": "What kind of table to find (can include column names or content)"
+    }
+  },
+  "workflow": [
+    {
+      "step": 1,
+      "action": "search_tables",
+      "description": "Search for tables matching the description",
+      "params": {
+        "query": "${description}",
+        "limit": 5
+      }
+    },
+    {
+      "step": 2,
+      "action": "for_each_table",
+      "description": "For each found table, get full context",
+      "sub_workflow": [
+        {
+          "action": "get_file",
+          "params": {
+            "path": "${table.file_path}"
+          }
+        },
+        {
+          "action": "extract_table_context",
+          "description": "Get heading, caption, and surrounding text"
+        }
+      ]
+    },
+    {
+      "step": 3,
+      "action": "format_tables",
+      "description": "Format tables with markdown and context",
+      "output": "Display tables with headers, rows, captions, and source info"
+    }
+  ],
+  "output_format": {
+    "type": "markdown",
+    "template": "## Found {count} table(s) for '{description}'\n\n### Table 1: {caption}\n**Source:** {file_path}\n\n{markdown_table}\n\n**Context:** {surrounding_text}"
+  }
+}

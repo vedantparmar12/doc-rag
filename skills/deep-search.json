@@ -1,0 +1,71 @@
+{
+  "name": "deep-search",
+  "description": "Comprehensive search across all documentation features including keyword search, semantic search, and table search. Returns rich context with tables, images, and related documents.",
+  "version": "1.0.0",
+  "author": "MCP Docs RAG",
+  "usage": "/deep-search <query>",
+  "examples": [
+    "/deep-search kubernetes deployment",
+    "/deep-search CI/CD pipeline configuration",
+    "/deep-search windows vm troubleshooting"
+  ],
+  "parameters": {
+    "query": {
+      "type": "string",
+      "required": true,
+      "description": "Search query (can be keywords or natural language question)"
+    }
+  },
+  "workflow": [
+    {
+      "step": 1,
+      "action": "search_docs",
+      "description": "Fast keyword search for exact matches",
+      "params": {
+        "query": "${query}",
+        "limit": 10
+      }
+    },
+    {
+      "step": 2,
+      "action": "semantic_search",
+      "description": "Semantic search for conceptually related content",
+      "params": {
+        "query": "${query}",
+        "limit": 10
+      }
+    },
+    {
+      "step": 3,
+      "action": "search_tables",
+      "description": "Search within tables for structured data",
+      "params": {
+        "query": "${query}",
+        "limit": 5
+      }
+    },
+    {
+      "step": 4,
+      "action": "combine_results",
+      "description": "Merge and rank all results by relevance",
+      "logic": "Deduplicate results, rank by score, include top 10"
+    },
+    {
+      "step": 5,
+      "action": "build_rich_context",
+      "description": "Build comprehensive context with tables, images, links",
+      "output": "Markdown-formatted response with all relevant information"
+    }
+  ],
+  "output_format": {
+    "type": "markdown",
+    "includes": [
+      "Search results summary",
+      "Relevant document excerpts",
+      "Tables with matching data",
+      "Images and diagrams (OCR text)",
+      "Related documents (via links)",
+      "Code examples and configurations"
+    ]
+  }
+}

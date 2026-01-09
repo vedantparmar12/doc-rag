@@ -1,0 +1,94 @@
+{
+  "skills_manifest": {
+    "version": "1.0.0",
+    "mcp_server": "docs-rag",
+    "description": "Predefined workflows for Documentation RAG MCP server",
+    "skills": [
+      {
+        "name": "deep-search",
+        "file": "deep-search.json",
+        "category": "search",
+        "difficulty": "beginner",
+        "estimated_time": "2-5 seconds",
+        "description": "Comprehensive search across all features"
+      },
+      {
+        "name": "find-table",
+        "file": "find-table.json",
+        "category": "data",
+        "difficulty": "beginner",
+        "estimated_time": "1-3 seconds",
+        "description": "Find and display specific tables"
+      },
+      {
+        "name": "explain-topic",
+        "file": "explain-topic.json",
+        "category": "learning",
+        "difficulty": "intermediate",
+        "estimated_time": "3-7 seconds",
+        "description": "Comprehensive topic explanation"
+      },
+      {
+        "name": "find-config",
+        "file": "find-config.json",
+        "category": "code",
+        "difficulty": "beginner",
+        "estimated_time": "1-3 seconds",
+        "description": "Extract configuration examples"
+      },
+      {
+        "name": "explore-docs",
+        "file": "explore-docs.json",
+        "category": "navigation",
+        "difficulty": "beginner",
+        "estimated_time": "1-2 seconds",
+        "description": "Browse documentation structure"
+      },
+      {
+        "name": "quick-answer",
+        "file": "quick-answer.json",
+        "category": "qa",
+        "difficulty": "beginner",
+        "estimated_time": "1-2 seconds",
+        "description": "Fast answer to specific questions"
+      }
+    ],
+    "categories": {
+      "search": {
+        "name": "Search & Discovery",
+        "description": "Find information across documentation",
+        "skills": ["deep-search", "quick-answer"]
+      },
+      "data": {
+        "name": "Structured Data",
+        "description": "Work with tables and structured information",
+        "skills": ["find-table"]
+      },
+      "learning": {
+        "name": "Learning & Understanding",
+        "description": "Deep dives into topics and concepts",
+        "skills": ["explain-topic"]
+      },
+      "code": {
+        "name": "Code & Configuration",
+        "description": "Find code examples and configurations",
+        "skills": ["find-config"]
+      },
+      "navigation": {
+        "name": "Navigation & Browsing",
+        "description": "Explore and navigate documentation",
+        "skills": ["explore-docs"]
+      },
+      "qa": {
+        "name": "Quick Questions",
+        "description": "Fast answers to specific questions",
+        "skills": ["quick-answer"]
+      }
+    },
+    "usage_guide": {
+      "github_copilot": "Use /skill-name in chat",
+      "codex_cli": "Use @docs-rag /skill-name",
+      "claude_desktop": "Mention skill by name in conversation"
+    }
+  }
+}

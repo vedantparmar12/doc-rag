@@ -1,0 +1,85 @@
+{
+  "name": "explain-topic",
+  "description": "Get a comprehensive explanation of a topic by gathering information from multiple documents, including definitions, examples, best practices, and related concepts.",
+  "version": "1.0.0",
+  "author": "MCP Docs RAG",
+  "usage": "/explain-topic <topic>",
+  "examples": [
+    "/explain-topic kubernetes deployment",
+    "/explain-topic CI/CD pipeline",
+    "/explain-topic infrastructure as code",
+    "/explain-topic microservices architecture"
+  ],
+  "parameters": {
+    "topic": {
+      "type": "string",
+      "required": true,
+      "description": "Topic to explain (can be a concept, technology, or process)"
+    }
+  },
+  "workflow": [
+    {
+      "step": 1,
+      "action": "semantic_search",
+      "description": "Find documents related to the topic",
+      "params": {
+        "query": "${topic}",
+        "limit": 10
+      }
+    },
+    {
+      "step": 2,
+      "action": "search_docs",
+      "description": "Find exact mentions of the topic",
+      "params": {
+        "query": "${topic}",
+        "limit": 10
+      }
+    },
+    {
+      "step": 3,
+      "action": "search_tables",
+      "description": "Find tables with relevant data",
+      "params": {
+        "query": "${topic}",
+        "limit": 3
+      }
+    },
+    {
+      "step": 4,
+      "action": "find_configs",
+      "description": "Extract code examples and configurations",
+      "params": {
+        "query": "${topic}"
+      }
+    },
+    {
+      "step": 5,
+      "action": "summarize_topic",
+      "description": "Create comprehensive summary",
+      "params": {
+        "topic": "${topic}"
+      }
+    }
+  ],
+  "output_format": {
+    "type": "markdown",
+    "structure": [
+      "# {topic} - Comprehensive Explanation",
+      "## Overview",
+      "Brief definition and introduction",
+      "## Key Concepts",
+      "Main ideas and terminology",
+      "## How It Works",
+      "Detailed explanation with examples",
+      "## Configuration & Setup",
+      "Code examples and configurations",
+      "## Best Practices",
+      "Recommendations from documentation",
+      "## Common Issues",
+      "Troubleshooting information",
+      "## Related Topics",
+      "Links to related documentation"
+    ]
+  }
+}
